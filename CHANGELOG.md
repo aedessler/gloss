@@ -13,6 +13,15 @@ how to restart.
 Versions are `major.minor.patch` — the patch number moves for fixes, the minor
 for refinements, the major for a change in how the reader itself works.
 
+## 1.1.1 — 2026-10-11
+
+- **A PDF with a figure made of thousands of tiny images no longer takes
+  minutes to open.** One page of a real paper stored its figure as 103,332
+  image blocks, and every text line was tested against every one of them with
+  pymupdf Rects -- 10 million intersections, 52 seconds for an 18-page paper.
+  Opening now compares a line only with the images near it, in plain
+  arithmetic: 4 seconds, with the same paragraphs found.
+
 ## 1.1.0 — 2026-08-22
 
 - **The text on a page can now be selected and copied.** A page is a picture,

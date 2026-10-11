@@ -283,10 +283,56 @@ def _body_sizes(doc):
     return sizes
 
 
+class _ImageIndex:
+    """Which lines sit inside a figure, fast even when a figure is 100,000 images.
+
+    A vector figure can be stored as one image block per tile -- one page of a
+    real paper held 103,332 -- and testing every line against every image with
+    pymupdf Rects took two minutes for that one page.  Plain tuples, bucketed
+    into a coarse grid so a line is only compared with the images near it.
+    """
+    CELL = 36.0
+
+    def __init__(self, boxes):
+        self.cells = {}
+        for box in boxes:
+            x0, y0, x1, y1 = box
+            if x1 <= x0 or y1 <= y0:
+                continue
+            for key in self._keys(x0, y0, x1, y1):
+                self.cells.setdefault(key, []).append((x0, y0, x1, y1))
+
+    def _keys(self, x0, y0, x1, y1):
+        c = self.CELL
+        for i in range(int(x0 // c), int(x1 // c) + 1):
+            for j in range(int(y0 // c), int(y1 // c) + 1):
+                yield i, j
+
+    def covers(self, bbox) -> bool:
+        """True when one image covers more than IMG_OVERLAP of the line."""
+        if not self.cells:
+            return False
+        x0, y0, x1, y1 = bbox
+        area = (x1 - x0) * (y1 - y0)
+        if area <= 0:
+            return False
+        seen = set()
+        for key in self._keys(x0, y0, x1, y1):
+            for img in self.cells.get(key, ()):
+                if id(img) in seen:
+                    continue
+                seen.add(id(img))
+                w = min(x1, img[2]) - max(x0, img[0])
+                h = min(y1, img[3]) - max(y0, img[1])
+                if w > 0 and h > 0 and w * h > IMG_OVERLAP * area:
+                    return True
+        return False
+
+
 def _raw_lines(page):
     """Every horizontal text line on a page, with geometry. No filtering yet."""
     data = page.get_text("dict")
-    images = [pymupdf.Rect(b["bbox"]) for b in data["blocks"] if b["type"] == 1]
+    covered = _ImageIndex([b["bbox"] for b in data["blocks"] if b["type"] == 1])
     out = []
     for block in data["blocks"]:
         if block["type"]:
@@ -299,10 +345,7 @@ def _raw_lines(page):
             text = "".join(s["text"] for s in line["spans"])
             if not text.strip():
                 continue
-            rect = pymupdf.Rect(line["bbox"])
-            if rect.get_area() > 0 and any(
-                    (rect & img).get_area() > IMG_OVERLAP * rect.get_area()
-                    for img in images):
+            if covered.covers(line["bbox"]):
                 continue
             spans = _inked(line["spans"])
             out.append(Line(
