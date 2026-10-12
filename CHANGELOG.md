@@ -13,6 +13,14 @@ how to restart.
 Versions are `major.minor.patch` — the patch number moves for fixes, the minor
 for refinements, the major for a change in how the reader itself works.
 
+## 1.2.0 — 2026-10-11
+
+- **The Question panel has a Clear button.** Once a question was asked, its
+  answer stayed in the panel for as long as the paper was open, with no way to
+  start over short of closing the PDF. A Clear button now appears beside the
+  close button as soon as there is something to clear, and empties the panel
+  back to its opening hint.
+
 ## 1.1.1 — 2026-10-11
 
 - **A PDF with a figure made of thousands of tiny images no longer takes

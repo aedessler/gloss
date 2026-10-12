@@ -74,14 +74,9 @@ async function openResult(result) {
   $("ask").disabled = false;
   document.body.classList.add("reading");
   rememberRecent(result.path, result.title || doc.title);
-  // Clear the thread: answers about the previous paper would be misleading
-  // sitting under a new one's title.
-  const thread = $("ask-thread");
-  thread.innerHTML = "";
-  const hint = el("p", "ask-empty");
-  hint.textContent = "Questions are answered from this document, with links " +
-                     "back to the passages the answer came from.";
-  thread.appendChild(hint);
+  // Answers about the previous paper would be misleading sitting under a new
+  // one's title.
+  clearThread();
   render();
   poll();
 }
@@ -634,6 +629,18 @@ function openAsk(open) {
   if (open) $("ask-input").focus();
 }
 
+/* Empty the thread back to its opening hint. Also what opening another PDF
+ * does, so there is one definition of "no questions asked yet". */
+function clearThread() {
+  const thread = $("ask-thread");
+  thread.innerHTML = "";
+  const hint = el("p", "ask-empty");
+  hint.textContent = "Questions are answered from this document, with links " +
+                     "back to the passages the answer came from.";
+  thread.appendChild(hint);
+  $("ask-clear").hidden = true;
+}
+
 /* Scroll a cited paragraph into view and flash it, so a citation in the answer
  * lands the reader on the actual passage rather than just naming it. */
 function jumpTo(id) {
@@ -697,6 +704,7 @@ async function submitQuestion(event) {
   if (!question || !state.sha) return;
 
   $("ask-thread").querySelector(".ask-empty")?.remove();
+  $("ask-clear").hidden = false;
   const thread = $("ask-thread");
   const q = el("p", "ask-q");
   q.textContent = question;
@@ -725,6 +733,10 @@ async function submitQuestion(event) {
 
 $("ask").addEventListener("click", () => openAsk($("ask-panel").hidden));
 $("ask-close").addEventListener("click", () => openAsk(false));
+$("ask-clear").addEventListener("click", () => {
+  clearThread();
+  $("ask-input").focus();
+});
 $("ask-form").addEventListener("submit", submitQuestion);
 $("ask-input").addEventListener("keydown", (event) => {
   // Enter sends; Shift+Enter is a newline, as in any chat box.
