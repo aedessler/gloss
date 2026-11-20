@@ -273,6 +273,8 @@ def resummarize(doc, sha, brief, paragraph_id, model=PARAGRAPH_MODEL):
 ANSWER_MODEL = None
 ASK_BUDGET = 60000      # chars of document text sent with a question
 SNIPPET_CHARS = 900     # per-paragraph cap when a long document is trimmed
+HISTORY_TURNS = 6       # earlier questions and answers a follow-up is read with
+HISTORY_CHARS = 4000    # per earlier answer, so a long thread stays a modest request
 
 _CITE_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 _WORD_RE = re.compile(r"[a-z0-9]{3,}")
@@ -285,7 +287,7 @@ BACKGROUND ON THE DOCUMENT:
 
 NUMBERED PASSAGES FROM THE DOCUMENT:
 {passages}
-
+{context}
 QUESTION:
 {question}
 
@@ -302,7 +304,7 @@ mark that sentence clearly as outside the document.
 question genuinely has several parts. No preamble, no restating the question."""
 
 
-def _relevant(paragraphs, question, budget=ASK_BUDGET):
+def _relevant(paragraphs, question, budget=ASK_BUDGET, keep=()):
     """Choose which paragraphs to send with a question.
 
     Short documents go in whole -- that is always the best context.  Long ones
@@ -311,6 +313,10 @@ def _relevant(paragraphs, question, budget=ASK_BUDGET):
     words and each paragraph's.  Crude next to a semantic search, but it reliably
     finds the passages that actually use the words being asked about, and it
     needs no index, no extra dependency, and no network call.
+
+    Paragraphs whose ids are in `keep` go in whatever their words: they are the
+    ones a conversation is already about, and a follow-up such as "why does that
+    matter?" shares no words with the passage it is asking about.
 
     Selected paragraphs are returned in document order so the model reads them
     in the order the author wrote them.
@@ -337,42 +343,115 @@ def _relevant(paragraphs, question, budget=ASK_BUDGET):
         scored.append((score, index, para))
     scored.sort(key=lambda row: (-row[0], row[1]))
 
-    chosen, used = [], 0
+    chosen = [(index, para) for index, para in enumerate(body) if para["id"] in keep]
+    taken = {index for index, _ in chosen}
+    used = sum(min(len(para["text"]), SNIPPET_CHARS) for _, para in chosen)
     for score, index, para in scored:
         if score <= 0:
             break
+        if index in taken:
+            continue
         length = min(len(para["text"]), SNIPPET_CHARS)
         if used + length > budget:
             continue
         chosen.append((index, para))
+        taken.add(index)
         used += length
     # Always include the opening, which carries the abstract and framing.
     for index, para in enumerate(body[:3]):
-        if not any(i == index for i, _ in chosen):
+        if index not in taken:
             chosen.append((index, para))
     chosen.sort(key=lambda row: row[0])
     return [para for _, para in chosen]
 
 
-def answer_question(doc, brief, question, model=ANSWER_MODEL):
+def _cited(text):
+    """Paragraph ids cited as [12] or [3, 14] in a piece of text, in order."""
+    ids = []
+    for group in _CITE_RE.findall(text or ""):
+        for number in group.split(","):
+            try:
+                pid = int(number)
+            except ValueError:
+                continue
+            if pid not in ids:
+                ids.append(pid)
+    return ids
+
+
+def _turns(history):
+    """The earlier exchanges a follow-up is read with, oldest first.
+
+    The browser sends the thread back with every question -- the server keeps
+    no conversation of its own -- so this is where it is checked: anything that
+    is not a question with its answer is dropped, and a long thread keeps only
+    its most recent turns.
+    """
+    if not isinstance(history, (list, tuple)):
+        return []
+    turns = []
+    for turn in history:
+        if not isinstance(turn, dict):
+            continue
+        asked = str(turn.get("question") or "").strip()
+        said = str(turn.get("answer") or "").strip()
+        if asked and said:
+            turns.append((asked[:2000], said[:HISTORY_CHARS]))
+    return turns[-HISTORY_TURNS:]
+
+
+def _context(turns, focus):
+    """The part of the prompt that ties a question to what came before it."""
+    parts = []
+    if focus is not None:
+        parts.append(
+            f"PASSAGE IN FOCUS: [{focus}]. The note the reader's first question "
+            "asks about is the margin summary written for that passage. Work "
+            "from the passage itself, not from the note's wording.")
+    if turns:
+        exchanges = "\n\n".join(f"Q: {asked}\nA: {said}" for asked, said in turns)
+        parts.append("THE CONVERSATION SO FAR (the question below follows on "
+                     f"from it):\n\n{exchanges}")
+    return "".join(f"\n{part}\n" for part in parts)
+
+
+def answer_question(doc, brief, question, history=(), focus=None,
+                    model=ANSWER_MODEL):
     """Answer a question about the document. Returns (answer, cited_ids).
 
     Passages are labelled with their paragraph id, so a citation in the answer
     maps straight back to a highlightable region on the page.
+
+    `history` is the conversation so far, as [{question, answer}], which is what
+    lets a follow-up say "why?".  `focus` is the id of a paragraph the
+    conversation is about -- the one whose Explain button started it.
     """
     question = (question or "").strip()
     if not question:
         raise ValueError("empty question")
 
-    selected = _relevant(doc["paragraphs"], question)
+    turns = _turns(history)
+    keep = {pid for _, said in turns for pid in _cited(said)}
+    if focus is not None:
+        keep.add(focus)
+    # Earlier questions count towards the ranking too: on a long document, a
+    # follow-up should land among the passages the conversation is about.
+    query = " ".join([asked for asked, _ in turns] + [question])
+
+    selected = _relevant(doc["paragraphs"], query, keep=keep)
     if not selected:
         raise ValueError("this document has no extractable text to search")
+    valid = {p["id"] for p in selected}
+    if focus not in valid:
+        focus = None
 
     trim = len(selected) > 40
     passages = []
     for para in selected:
         text = para["text"]
-        if trim and len(text) > SNIPPET_CHARS:
+        # The passage being explained goes in whole: trimming it would cut the
+        # very sentences the reader asked about.
+        if trim and len(text) > SNIPPET_CHARS and para["id"] != focus:
             text = text[:SNIPPET_CHARS] + " [...]"
         heading = f" ({para['section']})" if para.get("section") else ""
         passages.append(f"[{para['id']}]{heading} {text}")
@@ -380,20 +459,12 @@ def answer_question(doc, brief, question, model=ANSWER_MODEL):
     reply = llm.chat(ASK_PROMPT.format(
         brief=brief or "(not available yet)",
         passages="\n\n".join(passages),
+        context=_context(turns, focus),
         question=question,
     ), model)
 
     answer = (reply or "").strip()
-    valid = {p["id"] for p in selected}
-    cited = []
-    for group in _CITE_RE.findall(answer):
-        for number in group.split(","):
-            try:
-                pid = int(number)
-            except ValueError:
-                continue
-            if pid in valid and pid not in cited:
-                cited.append(pid)
+    cited = [pid for pid in _cited(answer) if pid in valid]
     return answer, cited
 
 

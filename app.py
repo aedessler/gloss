@@ -33,7 +33,7 @@ import summarize
 # The one place the version is written down.  It reaches the opening screen,
 # the /api/health probe below, and the startup banner from here; what changed in
 # each version is recorded in CHANGELOG.md.
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 CACHE_DIR = Path.home() / ".cache" / "gloss"
 PAGE_DIR = CACHE_DIR / "pages"
@@ -300,7 +300,12 @@ def resummarize():
 
 @app.route("/api/ask", methods=["POST"])
 def ask():
-    """Answer a question about the open document."""
+    """Answer a question about the open document.
+
+    The panel sends back the questions and answers already in it as `history`,
+    so a follow-up is read in their light; `focus` is the paragraph whose
+    Explain button started the conversation, if one did.
+    """
     body = request.json or {}
     entry = _entry(body.get("sha", ""))
     question = (body.get("question") or "").strip()
@@ -309,8 +314,13 @@ def ask():
     if len(question) > 2000:
         return jsonify({"error": "That question is too long."}), 400
     try:
+        focus = int(body["focus"]) if body.get("focus") is not None else None
+    except (TypeError, ValueError):
+        focus = None
+    try:
         answer, cited = summarize.answer_question(
-            entry["doc"], entry["brief"], question)
+            entry["doc"], entry["brief"], question,
+            history=body.get("history"), focus=focus)
     except summarize.SummarizerUnavailable as exc:
         return jsonify({"error": str(exc)}), 503
     except ValueError as exc:

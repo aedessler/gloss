@@ -27,6 +27,8 @@ const state = {
   watcher: null,         // fills a page's text layer as it nears the viewport
   showMargin: true,
   polling: null,
+  thread: { turns: [], focus: null, busy: false },   // the Question panel's
+                         // conversation: replaced whole by clearThread()
 };
 
 const $ = (id) => document.getElementById(id);
@@ -238,11 +240,22 @@ function render() {
     card.style.left = `${columns.at(para.anchor.page) - columns.base}px`;
     card.dataset.id = para.id;
 
+    const head = el("div", "head");
     const section = el("span", "sec");
     section.textContent = para.section || "";
+    const more = el("button", "explain");
+    more.type = "button";
+    more.textContent = "Explain";
+    more.title = "Explain this in more detail, in the Question panel";
+    more.addEventListener("click", (event) => {
+      event.stopPropagation();          // the card's own click would scroll it
+      activate(para.id, false);
+      explain(para.id);
+    });
+    head.append(section, more);
     const body = el("div", "body");
     body.textContent = "Summarizing this paragraph...";
-    card.append(section, body);
+    card.append(head, body);
 
     card.addEventListener("mouseenter", () => activate(para.id, false));
     card.addEventListener("click", () => activate(para.id, true));
@@ -623,14 +636,31 @@ function poll() {
 
 /* --- asking questions ----------------------------------------------------- */
 
+/* The panel holds a conversation, not a list of unrelated questions: the
+ * server keeps none, so every question goes with the exchanges before it, and
+ * that is what lets a follow-up say "why?".  Clear, an Explain button, and
+ * opening another paper each start a new one. */
+
+const FIRST_PROMPT = $("ask-input").placeholder;
+const NEXT_PROMPT = "Ask a follow-up...";
+
 function openAsk(open) {
   const panel = $("ask-panel");
   panel.hidden = !open;
   if (open) $("ask-input").focus();
 }
 
-/* Empty the thread back to its opening hint. Also what opening another PDF
- * does, so there is one definition of "no questions asked yet". */
+/* While an answer is being written the box is shut, so two questions are never
+ * in flight at once and a follow-up always goes with the answer before it. */
+function setAsking(busy) {
+  state.thread.busy = busy;
+  $("ask-input").disabled = busy;
+  $("ask-send").disabled = busy;
+}
+
+/* Empty the thread back to its opening hint, and forget the conversation with
+ * it. Also what opening another PDF does, so there is one definition of "no
+ * questions asked yet". */
 function clearThread() {
   const thread = $("ask-thread");
   thread.innerHTML = "";
@@ -639,6 +669,12 @@ function clearThread() {
                      "back to the passages the answer came from.";
   thread.appendChild(hint);
   $("ask-clear").hidden = true;
+  // A new object rather than emptied arrays: an answer still on its way holds
+  // the old one, and comparing the two is how it knows it is no longer wanted.
+  // The box opens now rather than when that answer lands.
+  state.thread = { turns: [], focus: null, busy: false };
+  setAsking(false);
+  $("ask-input").placeholder = FIRST_PROMPT;
 }
 
 /* Scroll a cited paragraph into view and flash it, so a citation in the answer
@@ -697,38 +733,64 @@ function renderAnswer(container, text) {
   container.appendChild(document.createTextNode(text.slice(last)));
 }
 
-async function submitQuestion(event) {
-  event.preventDefault();
-  const input = $("ask-input");
-  const question = input.value.trim();
-  if (!question || !state.sha) return;
+/* Put a question to the paper, as the next turn of the conversation. */
+async function ask(question) {
+  const convo = state.thread;
+  if (!question || !state.sha || convo.busy) return;
 
   $("ask-thread").querySelector(".ask-empty")?.remove();
   $("ask-clear").hidden = false;
-  const thread = $("ask-thread");
   const q = el("p", "ask-q");
   q.textContent = question;
   const a = el("div", "ask-a");
   a.textContent = "Reading the paper...";
-  thread.append(q, a);
+  $("ask-thread").append(q, a);
   a.scrollIntoView({ block: "nearest" });
 
-  input.value = "";
-  input.disabled = true;
-  $("ask-send").disabled = true;
+  setAsking(true);
   try {
-    const result = await post("/api/ask", { sha: state.sha, question });
+    const result = await post("/api/ask", {
+      sha: state.sha, question, history: convo.turns, focus: convo.focus,
+    });
+    if (convo !== state.thread) return;     // cleared while it was being written
     a.textContent = "";
     renderAnswer(a, result.answer);
+    convo.turns.push({ question, answer: result.answer });
+    $("ask-input").placeholder = NEXT_PROMPT;
   } catch (err) {
+    if (convo !== state.thread) return;
     a.classList.add("failed");
     a.textContent = err.message;
   } finally {
-    input.disabled = false;
-    $("ask-send").disabled = false;
-    input.focus();
-    a.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (convo === state.thread) {
+      setAsking(false);
+      $("ask-input").focus();
+      a.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
   }
+}
+
+function submitQuestion(event) {
+  event.preventDefault();
+  const input = $("ask-input");
+  const question = input.value.trim();
+  if (!question || !state.sha || state.thread.busy) return;
+  input.value = "";
+  ask(question);
+}
+
+/* A card's Explain button: a new conversation, about that note.  The note goes
+ * in the question, and the paragraph it summarizes goes along as the focus, so
+ * the answer is worked from the paragraph rather than from a rewording of the
+ * note -- and so are the follow-ups.  The note is not wrapped in quotation
+ * marks: plenty of notes open with a quoted phrase of their own. */
+function explain(id) {
+  const summary = state.summaries[id];
+  if (summary === undefined || !state.sha) return;
+  clearThread();
+  state.thread.focus = id;
+  openAsk(true);
+  ask(`Explain this in more detail: ${summary}`);
 }
 
 $("ask").addEventListener("click", () => openAsk($("ask-panel").hidden));

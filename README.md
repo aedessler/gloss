@@ -1,11 +1,7 @@
 # Gloss
 
-Read a paper with a short summary of every paragraph in the margin beside it.
-
-Each summary is written with the **whole document** as context, not just the
-paragraph on its own — so a paragraph that opens "Taken together, the outage
-results suggest…" gets a note that says *which* results and *whose* models,
-instead of paraphrasing the words in front of it.
+Read a paper with a short summary of every paragraph in the margin beside it. Each summary is written with the **whole document** as context, not just the
+paragraph on its own.
 
 Summaries come from whichever LLM provider you configure — OpenAI, Anthropic,
 TAMU AI, OpenRouter, or a model running locally under Ollama. The PDF itself
@@ -58,8 +54,12 @@ window running while you read.
 - **Question** (or ⌘K) opens a panel where you can ask anything about the open
   paper. Answers are drawn from the document itself and cite the passages they
   came from — click a citation to jump to that paragraph and flash it. If the
-  paper doesn't answer the question, it says so instead of guessing. Esc closes
-  the panel.
+  paper doesn't answer the question, it says so instead of guessing. Follow-up
+  questions carry on from the answers above them; **Clear** starts over. Esc
+  closes the panel.
+- **Explain**, on any summary, opens the Question panel on a fresh
+  conversation and asks for that note in more detail, worked from the
+  paragraph it summarizes. Ask follow-ups from there as usual.
 - **Summaries** toggles the margin; **+ / −** zoom.
 - Reopening a paper you've read before is instant — summaries are cached in
   `~/.cache/gloss/` by file hash.
@@ -115,6 +115,12 @@ opening pages for framing. Crude next to semantic search, but it needs no index
 and no extra dependency, and it finds the passages that use the words being asked
 about.
 
+The server keeps no conversation: the panel sends the questions and answers
+already in it (the last six) with each new one. On a long paper the passages
+those answers cited are always included, since a follow-up like "why?" shares
+no words with the passage it is about, and so is the paragraph an **Explain**
+button was pressed on.
+
 ## Testing
 
 ```bash
@@ -149,7 +155,6 @@ image. Red boxes get summarized, blue ones are too short to need it.
 ## Limits
 
 - **Scanned PDFs** with no text layer are detected and reported, not read.
-  Adding OCR would be a contained change (`tesseract` is already installed).
 - **Reference lists and figure captions** are excluded from summarizing.
 - **Tables get shredded into cells.** Each cell becomes its own paragraph, too
   short to summarize, so no card appears and nothing is sent to the model — but
@@ -162,13 +167,7 @@ image. Red boxes get summarized, blue ones are too short to need it.
   Reading order is always preserved, and the connector curve shows the pairing.
 - Complex front pages (a title block beside a sidebar) are segmented
   best-effort; a section label may occasionally be missing rather than wrong.
-- **Local models are much slower than hosted ones, by a lot.** Measured on this
-  Mac with `qwen3.6` (23 GB): 70 s for the whole-document pass and ~84 s per
-  paragraph, which works out to roughly an hour for a 76-paragraph paper rather
-  than the ~1 minute TAMU takes. That is inherent — a paper is ~115,000 input
-  tokens and local prompt processing is far slower. Use a smaller model
-  (`ollama pull qwen3:4b`) if you want local summaries at a usable speed; the
-  quality drop matters less for margin notes than it would for prose. Gloss
+- **Local models are much slower than hosted ones, by a lot.** Gloss
   automatically drops to 2 parallel requests and a 15-minute timeout for local
   providers, because one local server queues rather than parallelizes.
 

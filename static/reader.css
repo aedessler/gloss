@@ -192,11 +192,23 @@ body:not(.reading) .bar { display: none; }
   border-left-color: var(--accent); color: var(--ink);
   box-shadow: var(--shadow); transform: translateX(-2px);
 }
+.card .head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .card .sec {
-  display: block; font-size: 10px; text-transform: uppercase;
-  letter-spacing: 0.06em; color: var(--accent); margin-bottom: 4px;
+  flex: 1; min-width: 0; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--accent);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* Asks the Question panel to expand the note.  Quiet until its card is the one
+   being read, so a margin full of them doesn't compete with the notes. */
+.card .explain {
+  flex: none; margin-left: auto;
+  font: inherit; font-size: 11px; font-weight: 600; line-height: 16px;
+  padding: 0 7px; border: 0; border-radius: 4px; cursor: pointer;
+  background: transparent; color: var(--ink-soft);
+}
+.card:hover .explain, .card.on .explain { background: var(--accent-soft); color: var(--accent); }
+.card .explain:hover { background: var(--accent); color: #fff; }
+.card.pending .explain, .card.failed .explain { visibility: hidden; }
 .card .retry {
   background: none; border: 0; padding: 0; font: inherit; font-size: 12px;
   color: var(--accent); cursor: pointer; text-decoration: underline;

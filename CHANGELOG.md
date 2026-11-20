@@ -13,6 +13,22 @@ how to restart.
 Versions are `major.minor.patch` — the patch number moves for fixes, the minor
 for refinements, the major for a change in how the reader itself works.
 
+## 1.3.0 — 2026-11-20
+
+- **Every summary card has an Explain button.** It opens the Question panel
+  on a fresh conversation and asks for that note in more detail. The note goes
+  in the question, and the paragraph it summarizes is sent with it as
+  the passage in focus -- whole, even where a long paper's other passages are
+  trimmed -- so the explanation is worked from the paragraph itself rather
+  than from a rewording of the note.
+- **A question now follows on from the ones before it.** Each question used to
+  be answered as if it were the first, so "why?" or "what does that mean for
+  the totals?" had nothing to refer to. The panel now sends the conversation
+  so far with every question, and on a long paper the passages earlier
+  answers cited go along too. Clear, an Explain button, or opening another
+  paper starts a new conversation, and an answer still being written when
+  that happens is dropped rather than landing in the new one.
+
 ## 1.2.0 — 2026-10-11
 
 - **The Question panel has a Clear button.** Once a question was asked, its
